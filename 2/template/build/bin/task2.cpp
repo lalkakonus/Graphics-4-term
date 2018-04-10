@@ -100,12 +100,12 @@ vector<float> Gistogram(Matrix <pair <float, float>> & data, int N = 10, int M =
 		};
 
 	float tmp_sum = 0;
-	for (int i = 0; i < N * M; i++){
+	for (unsigned i = 0; i < data.n_rows; i++){
 		tmp_sum = 0;
-		for (int j = 0; j < S; j++)
+		for (unsigned j = 0; j < data.n_cols; j++)
 			tmp_sum += tmp(i, j);
-		if (tmp_sum > 0.0001)
-			for (int j = 0; j < S; j++)
+		if (tmp_sum < 0.0001)
+			for (unsigned j = 0; j < data.n_cols; j++)
 				tmp(i, j) /= tmp_sum;
 		};
 	// Normalization
@@ -132,15 +132,15 @@ vector <float> LBP_descriptor(Matrix <float> & grayscale, int M = 10, int N = 10
 
 	for (unsigned i = 1; i < grayscale.n_rows + 1; i++)
 		for (unsigned j = 1; j < grayscale.n_cols + 1; j++){
-			cell_value = 0;
+			
 			for (int x = -1; x < 2; x++)
 				for (int y = -1; y < 2; y++){
 					if ((x == 0) && (y == 0))
 						continue;
 					cell_value = cell_value << 1;
-					cell_value += (tmp(i, j) <= tmp(i + y, j + x));
+					cell_value += (tmp(i, j) <= tmp(i + x, j + y));
 				};
-			descriptor(int((j - 1)/ x_size) + int(((i - 1) / y_size)) * N, cell_value) += 1;
+			descriptor(j / x_size + (i / y_size) * M, cell_value) += 1;
 		};
 
 	int row_sum = 0;
@@ -163,38 +163,41 @@ vector <float> LBP_descriptor(Matrix <float> & grayscale, int M = 10, int N = 10
 }
 
 vector <float> Color_Features(BMP * image){
-	Matrix <std::vector <float>> average_color(8, 8);
+	Matrix <std::tuple <unsigned, unsigned, unsigned, int>> average_color(8, 8);
 	RGBApixel pixel;
-	int count;
+	int r, g, b, count;
 	
 	float x_size = image -> TellWidth() / 8.0;
 	float y_size = image -> TellHeight() / 8.0;
 	
 	for (int i = 0; i < 8; i++)
 		for (int j = 0; j < 8; j++)
-			//for (int k = 0; k < 4; k++)
-			//	average_color(i, j). push_back(0);
-			average_color(i,j).insert(average_color(i, j).end(), 4, 0);
+			average_color(i,j) = std::make_tuple(0, 0, 0, 0); 
 	
 	for (int y = 0; y < image -> TellHeight(); y++)
 		for (int x = 0; x < image -> TellWidth(); x++){
 			pixel = image -> GetPixel(x, y);
-			average_color(int(x / x_size), int(y / y_size))[0] += pixel.Red;
-			average_color(int(x / x_size), int(y / y_size))[1] += pixel.Green;
-			average_color(int(x / x_size), int(y / y_size))[2] += pixel.Blue;
-			average_color(int(x / x_size), int(y / y_size))[3] ++;
-		};
-
+			std::tie(r, g, b, count) = average_color(int(x / x_size), int(y / y_size));
+			r += pixel.Red;
+			g += pixel.Green;
+			b += pixel.Blue;
+			count++;
+		}
 
 	vector <float> color_vector;
 	for (int i = 0; i < 8; i++)
 		for (int j = 0; j < 8; j++){
-			count  = average_color(i, j)[3];
-			if (count > 0.0001)
-				for (int k = 0; k < 3; k++)
-					average_color(i, j)[k] /= count * 255.0 ;
-			for (int k = 0; k < 3; k++)
-				color_vector.push_back(average_color(i, j)[k]);
+			
+			std::tie(r, g, b, count) = average_color(i, j);
+			if (count < 0.0001){
+				r /= count * 256.0 ;
+				g /= count * 256.0;
+				b /= count * 256.0;
+			};
+
+			color_vector.push_back(r);
+			color_vector.push_back(g);
+			color_vector.push_back(b);
 		};
 
 	return color_vector;
@@ -313,14 +316,15 @@ void ExtractFeatures(const TDataSet& data_set, TFeatures* features) {
 		gradient = Gradient(Y);
 		direction_vector = Abs_and_angel(gradient);
 		
-		LBP_vector = LBP_descriptor(Y);
-		color_vector = Color_Features(image);
+		//LBP_vector = LBP_descriptor(Y);
+		//color_vector = Color_Features(image);
 		
         feature_vector.clear();
 		
 		feature_vector = Gistogram(direction_vector);
-		feature_vector.insert(feature_vector.end(), LBP_vector.begin(), LBP_vector.end());
-		feature_vector.insert(feature_vector.end(), color_vector.begin(), color_vector.end());
+		//feature_vector.insert(feature_vector.end(), LBP_vector.begin(), LBP_vector.end());
+		//feature_vector.insert(feature_vector.end(), color_vector.begin(), color_vector.end());
+		
 		features -> push_back(make_pair(feature_vector, target));
 	};
 }
