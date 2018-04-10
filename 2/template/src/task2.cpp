@@ -77,25 +77,130 @@ void SavePredictions(const TFileList& file_list,
     stream.close();
 }
 
-Matrix <float> brightness(BMP * image);
-Matrix <pair <float, float>> gradient(Matrix <float> & brigtness);
-Matrix <pair <float, float>> abs_and_angel(Matrix <pair <float, float>> grad);
-vector <float> gist(int N, int M, int S0, Matrix <pair <float, float>> data);
+#define PI 3.14159265
+vector<float> Gistogram(Matrix <pair <float, float>> & data, int N = 10, int M = 10, int S = 10){
+	vector <float> feature_vect;
+	Matrix <float> tmp(N*M, S);
 
-// Exatract features from dataset.
-void ExtractFeatures(const TDataSet& data_set, TFeatures* features) {
-	BMP * image;
-	int target;
-    
-	for (size_t image_idx = 0; image_idx < data_set.size(); ++image_idx){
-		image = data_set[image_idx].first;
-		target = data_set[image_idx].second;
+	for (int i = 0; i < N*M; i++)
+		for (int j = 0; j < S; j++)
+			tmp(i, j) = 0;
 
-		Matrix <float> Y = brightness(image);
-		Matrix <pair <float, float>> grad = gradient(Y);
-		Matrix <pair <float, float>> dir_abs = abs_and_angel(grad);        
-        features -> push_back(make_pair(gist(10, 10, 10, dir_abs), target));
-     };
+	float x_size = float(data.n_cols) / M;
+	float y_size = float(data.n_rows) / N;
+	int dir_class = 0;
+	int x_cell, y_cell;
+
+	for (unsigned i = 0; i < data.n_rows; i++)
+		for (unsigned j = 0; j < data.n_cols; j++){
+			dir_class = (data(i, j).second * 0.99999 + PI) / (2 * PI / float(S));
+			x_cell = j / x_size;
+			y_cell = i / y_size;
+			tmp(x_cell + y_cell * M, dir_class) = 	tmp(x_cell + y_cell * M, dir_class) + data(i, j).first;
+		};
+
+	float tmp_sum = 0;
+	for (unsigned i = 0; i < data.n_rows; i++){
+		tmp_sum = 0;
+		for (unsigned j = 0; j < data.n_cols; j++)
+			tmp_sum += tmp(i, j);
+		if (tmp_sum < 0.0001)
+			for (unsigned j = 0; j < data.n_cols; j++)
+				tmp(i, j) /= tmp_sum;
+		};
+	// Normalization
+
+	for (int i = 0; i < N*M; i++)
+		for (int j = 0; j < S; j++)
+			feature_vect.push_back(tmp(i, j));
+	
+	return feature_vect;
+}
+
+vector <float> LBP_descriptor(Matrix <float> & grayscale, int M = 10, int N = 10){
+	// N - row count of cells, M column count of cells
+	Matrix <float> tmp = grayscale.extra_borders(1, 1);
+	Matrix <float> descriptor(N * M, 256);
+
+	for (int i = 0; i < N * M; i++)
+		for (int j = 0; j < 256; j++)
+			descriptor(i, j) = 0;
+	
+	float x_size = float(grayscale.n_cols) / M;
+	float y_size = float(grayscale.n_rows) / N;
+	unsigned cell_value = 0;
+
+	for (unsigned i = 1; i < grayscale.n_rows + 1; i++)
+		for (unsigned j = 1; j < grayscale.n_cols + 1; j++){
+			
+			for (int x = -1; x < 2; x++)
+				for (int y = -1; y < 2; y++){
+					if ((x == 0) && (y == 0))
+						continue;
+					cell_value = cell_value << 1;
+					cell_value += (tmp(i, j) <= tmp(i + x, j + y));
+				};
+			descriptor(j / x_size + (i / y_size) * M, cell_value) += 1;
+		};
+
+	int row_sum = 0;
+	for (unsigned i = 0; i < descriptor.n_rows; i++){
+		row_sum = 0;
+		for (unsigned j = 0; j < descriptor.n_cols; j++)
+			row_sum += descriptor(i, j);
+		if (row_sum)
+			for (unsigned j = 0; j < descriptor.n_cols; j++)
+				descriptor(i, j) /= row_sum;
+		};
+	// Normalization
+	
+	vector <float> LBP_vector;
+	for (unsigned i = 0; i < descriptor.n_rows; i++)
+		for (unsigned j = 0; j < descriptor.n_cols; j++)
+			LBP_vector.push_back(descriptor(i, j));
+
+	return LBP_vector; 
+}
+
+vector <float> Color_Features(BMP * image){
+	Matrix <std::tuple <unsigned, unsigned, unsigned, int>> average_color(8, 8);
+	RGBApixel pixel;
+	int r, g, b, count;
+	
+	float x_size = image -> TellWidth() / 8.0;
+	float y_size = image -> TellHeight() / 8.0;
+	
+	for (int i = 0; i < 8; i++)
+		for (int j = 0; j < 8; j++)
+			average_color(i,j) = std::make_tuple(0, 0, 0, 0); 
+	
+	for (int y = 0; y < image -> TellHeight(); y++)
+		for (int x = 0; x < image -> TellWidth(); x++){
+			pixel = image -> GetPixel(x, y);
+			std::tie(r, g, b, count) = average_color(int(x / x_size), int(y / y_size));
+			r += pixel.Red;
+			g += pixel.Green;
+			b += pixel.Blue;
+			count++;
+		}
+
+	vector <float> color_vector;
+	for (int i = 0; i < 8; i++)
+		for (int j = 0; j < 8; j++){
+			
+			std::tie(r, g, b, count) = average_color(i, j);
+			if (count < 0.0001){
+				r /= count * 256.0 ;
+				g /= count * 256.0;
+				b /= count * 256.0;
+			};
+
+			color_vector.push_back(r);
+			color_vector.push_back(g);
+			color_vector.push_back(b);
+		};
+
+	return color_vector;
 }
 
 // Clear dataset structure
@@ -114,8 +219,9 @@ unsigned max(unsigned a, unsigned b){
 		return b;
 }
 
-Matrix <float> custom(Matrix <float> src_matrix, Matrix<float> kernel) {	
+Matrix <float> Custom(Matrix <float> src_matrix, Matrix<float> kernel) {	
 	float  sum = 0;
+
 	unsigned k_cols = kernel.n_cols;
 	unsigned k_rows = kernel.n_rows;
 	
@@ -143,7 +249,7 @@ Matrix <float> custom(Matrix <float> src_matrix, Matrix<float> kernel) {
 	return result.submatrix(offset, offset, src_matrix.n_rows, src_matrix.n_cols);
 }
 
-Matrix <float> brightness(BMP * image){
+Matrix <float> Brightness(BMP * image){
 	int heigth = image -> TellHeight();
 	int width = image -> TellWidth();
 
@@ -159,7 +265,7 @@ Matrix <float> brightness(BMP * image){
 	return brigtness;
 }
 
-Matrix <pair <float, float>> gradient(Matrix <float> & brigtness){
+Matrix <pair <float, float>> Gradient(Matrix <float> & brigtness){
 	Matrix <float> x_sobel = {{0,  0, 0},
 							  {-1, 0, 1},
 							  {0,  0, 0}};
@@ -168,23 +274,23 @@ Matrix <pair <float, float>> gradient(Matrix <float> & brigtness){
 							  {0,  0, 0},
 						      {0, -1, 0}};
 
-	Matrix <float> x_grad = custom(brigtness, x_sobel);	
-	Matrix <float> y_grad = custom(brigtness, y_sobel);
+	Matrix <float> x_der = Custom(brigtness, x_sobel);	
+	Matrix <float> y_der = Custom(brigtness, y_sobel);
 
 	Matrix <pair <float, float>> grad(brigtness.n_rows, brigtness.n_cols);
 
 	for (unsigned i = 0; i < brigtness.n_rows; i++)
 		for (unsigned j = 0; j < brigtness.n_cols; j++)
-			grad(i, j) = make_pair(x_grad(i, j), y_grad(i, j));
+			grad(i, j) = make_pair(x_der(i, j), y_der(i, j));
 	
 	return grad;
 }
 
-Matrix <pair <float, float>> abs_and_angel(Matrix <pair <float, float>> grad){
+Matrix <pair <float, float>> Abs_and_angel(Matrix <pair <float, float>> & grad){
 	Matrix <pair <float, float>> result(grad.n_rows, grad.n_cols);	
 	float x, y;
 	for (unsigned i = 0; i < result.n_rows; i++)
-		for (unsigned j = 0; j <	result.n_cols; j++){
+		for (unsigned j = 0; j < result.n_cols; j++){
 			x = grad(i,j).first;
 			y = grad(i,j).second;
 			result(i,j) = make_pair(sqrt(x * x + y * y), atan2(y, x));
@@ -192,33 +298,35 @@ Matrix <pair <float, float>> abs_and_angel(Matrix <pair <float, float>> grad){
 	return result;
 }
 
-#define PI 3.14159265
-vector<float> gist(int N, int M, int S, Matrix <pair <float, float>> data){
-	vector <float> feature_vect;
-	Matrix <float> tmp(N*M, S);
-
-	for (int i = 0; i < N*M; i++)
-		for (int j = 0; j < S; j++)
-			tmp(i, j) = 0;
-
-	int x_size = float(data.n_cols) / M - 1;
-	int y_size = float(data.n_rows) / N - 1;
-	int dir_class = 0;
-	float x_cell, y_cell;
-
-	for (unsigned i = 0; i < data.n_rows; i++)
-		for (unsigned j = 0; j < data.n_cols; j++){
-			dir_class = data(i, j).second / (PI / S) + S/2;
-			x_cell = j / x_size;
-			y_cell = i / y_size;
-			tmp(x_cell + y_cell * M, dir_class) = tmp(x_cell + y_cell * M, dir_class) + data(i, j).first;
-		};
-
-	for (int i = 0; i < N*M; i++)
-		for (int j = 0; j < S; j++)
-			feature_vect.push_back(tmp(i, j));
+// Exatract features from dataset.
+void ExtractFeatures(const TDataSet& data_set, TFeatures* features) {
+	BMP * image;
+	int target;
 	
-	return feature_vect;
+	Matrix <float> Y; 
+	Matrix <pair <float, float>> direction_vector, gradient;
+	vector <float> feature_vector, LBP_vector, color_vector;
+
+	std::cout << data_set.size() << '\n';
+	for (size_t image_idx = 0; image_idx < data_set.size(); ++image_idx){
+		image = data_set[image_idx].first;
+		target = data_set[image_idx].second;
+
+		Y = Brightness(image);
+		gradient = Gradient(Y);
+		direction_vector = Abs_and_angel(gradient);
+		
+		LBP_vector = LBP_descriptor(Y);
+		color_vector = Color_Features(image);
+		
+        feature_vector.clear();
+		
+		feature_vector = Gistogram(direction_vector);
+		feature_vector.insert(feature_vector.end(), LBP_vector.begin(), LBP_vector.end());
+		feature_vector.insert(feature_vector.end(), color_vector.begin(), color_vector.end());
+		
+		features -> push_back(make_pair(feature_vector, target));
+	};
 }
 	
 // Train SVM classifier using data from 'data_file' and save trained model
@@ -238,7 +346,12 @@ void TrainClassifier(const string& data_file, const string& model_file) {
         // Load list of image file names and its labels
     LoadFileList(data_file, &file_list);
         // Load images
-    LoadImages(file_list, &data_set);
+	file_list.pop_back();
+		
+    //for (auto it = file_list.begin(); it < file_list.end(); it++)
+	//	std::cout << (*it).first << "\n";
+	
+	LoadImages(file_list, &data_set);
         // Extract features from images
     ExtractFeatures(data_set, &features);
 
